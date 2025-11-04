@@ -6042,3 +6042,184 @@ func (s *server) GetUserLID() http.HandlerFunc {
 		}
 	}
 }
+
+// ConfigureChatwoot configures Chatwoot integration for a user
+func (s *server) ConfigureChatwoot() http.HandlerFunc {
+	type chatwootConfigStruct struct {
+		Enabled     bool   `json:"enabled"`
+		BaseURL     string `json:"base_url"`
+		AccountID   string `json:"account_id"`
+		InboxID     string `json:"inbox_id"`
+		APIToken    string `json:"api_token"`
+		AutoCreate  bool   `json:"auto_create"`
+		SyncMedia   bool   `json:"sync_media"`
+	}
+
+	return func(w http.ResponseWriter, r *http.Request) {
+		txtid := r.Context().Value("userinfo").(Values).Get("Id")
+
+		decoder := json.NewDecoder(r.Body)
+		var t chatwootConfigStruct
+		err := decoder.Decode(&t)
+		if err != nil {
+			s.Respond(w, r, http.StatusBadRequest, errors.New("could not decode payload"))
+			return
+		}
+
+		// Validate required fields if enabled
+		if t.Enabled {
+			if t.BaseURL == "" || t.AccountID == "" || t.InboxID == "" || t.APIToken == "" {
+				s.Respond(w, r, http.StatusBadRequest, errors.New("base_url, account_id, inbox_id, and api_token are required when enabled"))
+				return
+			}
+		}
+
+		// Update database
+		_, err = s.db.Exec(`
+			UPDATE users SET
+				chatwoot_enabled = $1,
+				chatwoot_base_url = $2,
+				chatwoot_account_id = $3,
+				chatwoot_inbox_id = $4,
+				chatwoot_api_token = $5,
+				chatwoot_auto_create = $6,
+				chatwoot_sync_media = $7
+			WHERE id = $8`,
+			t.Enabled, t.BaseURL, t.AccountID, t.InboxID, t.APIToken,
+			t.AutoCreate, t.SyncMedia, txtid)
+
+		if err != nil {
+			log.Error().Err(err).Str("userID", txtid).Msg("Failed to update Chatwoot configuration")
+			s.Respond(w, r, http.StatusInternalServerError, errors.New("failed to update chatwoot configuration"))
+			return
+		}
+
+		// Initialize or remove Chatwoot client
+		config := &ChatwootConfig{
+			Enabled:     t.Enabled,
+			BaseURL:     t.BaseURL,
+			AccountID:   t.AccountID,
+			InboxID:     t.InboxID,
+			APIToken:    t.APIToken,
+			AutoCreate:  t.AutoCreate,
+			SyncMedia:   t.SyncMedia,
+		}
+
+		chatwootManager := GetChatwootManager()
+		err = chatwootManager.InitializeChatwootClient(txtid, config)
+		if err != nil {
+			log.Error().Err(err).Str("userID", txtid).Msg("Failed to initialize Chatwoot client")
+			s.Respond(w, r, http.StatusInternalServerError, errors.New("failed to initialize chatwoot client"))
+			return
+		}
+
+		log.Info().Str("userID", txtid).Bool("enabled", t.Enabled).Msg("Chatwoot configuration updated")
+		s.Respond(w, r, http.StatusOK, "Chatwoot configuration updated successfully")
+	}
+}
+
+// GetChatwootConfig returns the Chatwoot configuration for a user
+func (s *server) GetChatwootConfig() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		txtid := r.Context().Value("userinfo").(Values).Get("Id")
+
+		var config struct {
+			Enabled     bool   `db:"chatwoot_enabled"`
+			BaseURL     string `db:"chatwoot_base_url"`
+			AccountID   string `db:"chatwoot_account_id"`
+			InboxID     string `db:"chatwoot_inbox_id"`
+			APIToken    string `db:"chatwoot_api_token"`
+			AutoCreate  bool   `db:"chatwoot_auto_create"`
+			SyncMedia   bool   `db:"chatwoot_sync_media"`
+		}
+
+		err := s.db.Get(&config, `
+			SELECT
+				chatwoot_enabled, chatwoot_base_url, chatwoot_account_id,
+				chatwoot_inbox_id, chatwoot_api_token, chatwoot_auto_create,
+				chatwoot_sync_media
+			FROM users WHERE id = $1`, txtid)
+
+		if err != nil {
+			log.Error().Err(err).Str("userID", txtid).Msg("Failed to get Chatwoot configuration")
+			s.Respond(w, r, http.StatusInternalServerError, errors.New("failed to get chatwoot configuration"))
+			return
+		}
+
+		// Mask API token for security (show only first 4 chars)
+		if len(config.APIToken) > 4 {
+			config.APIToken = config.APIToken[:4] + "****"
+		}
+
+		responseJson, err := json.Marshal(config)
+		if err != nil {
+			s.Respond(w, r, http.StatusInternalServerError, err)
+			return
+		}
+
+		s.Respond(w, r, http.StatusOK, string(responseJson))
+	}
+}
+
+// DeleteChatwootConfig disables Chatwoot integration for a user
+func (s *server) DeleteChatwootConfig() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		txtid := r.Context().Value("userinfo").(Values).Get("Id")
+
+		_, err := s.db.Exec(`
+			UPDATE users SET
+				chatwoot_enabled = false,
+				chatwoot_base_url = '',
+				chatwoot_account_id = '',
+				chatwoot_inbox_id = '',
+				chatwoot_api_token = '',
+				chatwoot_auto_create = true,
+				chatwoot_sync_media = true
+			WHERE id = $1`, txtid)
+
+		if err != nil {
+			log.Error().Err(err).Str("userID", txtid).Msg("Failed to delete Chatwoot configuration")
+			s.Respond(w, r, http.StatusInternalServerError, errors.New("failed to delete chatwoot configuration"))
+			return
+		}
+
+		// Remove Chatwoot client
+		chatwootManager := GetChatwootManager()
+		chatwootManager.RemoveClient(txtid)
+
+		log.Info().Str("userID", txtid).Msg("Chatwoot configuration deleted")
+		s.Respond(w, r, http.StatusOK, "Chatwoot configuration deleted successfully")
+	}
+}
+
+// TestChatwootConnection tests the Chatwoot connection
+func (s *server) TestChatwootConnection() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		txtid := r.Context().Value("userinfo").(Values).Get("Id")
+
+		chatwootManager := GetChatwootManager()
+		if !chatwootManager.IsEnabled(txtid) {
+			s.Respond(w, r, http.StatusBadRequest, errors.New("chatwoot is not enabled"))
+			return
+		}
+
+		// Try to search for a test contact (will fail if connection is wrong)
+		config, exists := chatwootManager.GetConfig(txtid)
+		if !exists {
+			s.Respond(w, r, http.StatusInternalServerError, errors.New("chatwoot configuration not found"))
+			return
+		}
+
+		// Test by making a simple API call to get account info
+		endpoint := fmt.Sprintf("/api/v1/accounts/%s", config.AccountID)
+		_, err := chatwootManager.doRequest(txtid, "GET", endpoint, nil)
+		if err != nil {
+			log.Error().Err(err).Str("userID", txtid).Msg("Chatwoot connection test failed")
+			s.Respond(w, r, http.StatusBadRequest, fmt.Errorf("connection test failed: %w", err))
+			return
+		}
+
+		log.Info().Str("userID", txtid).Msg("Chatwoot connection test successful")
+		s.Respond(w, r, http.StatusOK, "Chatwoot connection test successful")
+	}
+}

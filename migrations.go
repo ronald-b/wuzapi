@@ -70,6 +70,11 @@ var migrations = []Migration{
 		Name:  "add_data_json",
 		UpSQL: addDataJsonSQL,
 	},
+	{
+		ID:    9,
+		Name:  "add_chatwoot_support",
+		UpSQL: addChatwootSupportSQL,
+	},
 }
 
 const changeIDToStringSQL = `
@@ -435,6 +440,31 @@ func applyMigration(db *sqlx.DB, migration Migration) error {
 		} else {
 			_, err = tx.Exec(migration.UpSQL)
 		}
+	} else if migration.ID == 9 {
+		if db.DriverName() == "sqlite" {
+			// Handle Chatwoot columns for SQLite
+			err = addColumnIfNotExistsSQLite(tx, "users", "chatwoot_enabled", "BOOLEAN DEFAULT 0")
+			if err == nil {
+				err = addColumnIfNotExistsSQLite(tx, "users", "chatwoot_base_url", "TEXT DEFAULT ''")
+			}
+			if err == nil {
+				err = addColumnIfNotExistsSQLite(tx, "users", "chatwoot_account_id", "TEXT DEFAULT ''")
+			}
+			if err == nil {
+				err = addColumnIfNotExistsSQLite(tx, "users", "chatwoot_inbox_id", "TEXT DEFAULT ''")
+			}
+			if err == nil {
+				err = addColumnIfNotExistsSQLite(tx, "users", "chatwoot_api_token", "TEXT DEFAULT ''")
+			}
+			if err == nil {
+				err = addColumnIfNotExistsSQLite(tx, "users", "chatwoot_auto_create", "BOOLEAN DEFAULT 1")
+			}
+			if err == nil {
+				err = addColumnIfNotExistsSQLite(tx, "users", "chatwoot_sync_media", "BOOLEAN DEFAULT 1")
+			}
+		} else {
+			_, err = tx.Exec(migration.UpSQL)
+		}
 	} else {
 		_, err = tx.Exec(migration.UpSQL)
 	}
@@ -641,6 +671,43 @@ BEGIN
     -- Add hmac_key column as BYTEA for encrypted data
     IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'users' AND column_name = 'hmac_key') THEN
         ALTER TABLE users ADD COLUMN hmac_key BYTEA;
+    END IF;
+END $$;
+
+-- SQLite version (handled in code)
+`
+
+const addChatwootSupportSQL = `
+-- PostgreSQL version - Add Chatwoot integration support
+DO $$
+BEGIN
+    -- Add Chatwoot configuration columns if they don't exist
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'users' AND column_name = 'chatwoot_enabled') THEN
+        ALTER TABLE users ADD COLUMN chatwoot_enabled BOOLEAN DEFAULT FALSE;
+    END IF;
+
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'users' AND column_name = 'chatwoot_base_url') THEN
+        ALTER TABLE users ADD COLUMN chatwoot_base_url TEXT DEFAULT '';
+    END IF;
+
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'users' AND column_name = 'chatwoot_account_id') THEN
+        ALTER TABLE users ADD COLUMN chatwoot_account_id TEXT DEFAULT '';
+    END IF;
+
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'users' AND column_name = 'chatwoot_inbox_id') THEN
+        ALTER TABLE users ADD COLUMN chatwoot_inbox_id TEXT DEFAULT '';
+    END IF;
+
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'users' AND column_name = 'chatwoot_api_token') THEN
+        ALTER TABLE users ADD COLUMN chatwoot_api_token TEXT DEFAULT '';
+    END IF;
+
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'users' AND column_name = 'chatwoot_auto_create') THEN
+        ALTER TABLE users ADD COLUMN chatwoot_auto_create BOOLEAN DEFAULT TRUE;
+    END IF;
+
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'users' AND column_name = 'chatwoot_sync_media') THEN
+        ALTER TABLE users ADD COLUMN chatwoot_sync_media BOOLEAN DEFAULT TRUE;
     END IF;
 END $$;
 

@@ -1297,6 +1297,45 @@ func (mycli *MyClient) myEventHandler(rawEvt interface{}) {
 						log.Error().Err(err).Msg("Failed to trim message history")
 					}
 				}
+
+				// Sync message to Chatwoot if enabled
+				chatwootManager := GetChatwootManager()
+				if chatwootManager.IsEnabled(mycli.userID) {
+					// Get phone number from sender
+					phoneNumber := evt.Info.Sender.User
+					if evt.Info.IsGroup {
+						// For group messages, use the actual sender, not the group
+						phoneNumber = evt.Info.Sender.User
+					}
+
+					// Get name from push name or use phone number
+					name := evt.Info.PushName
+					if name == "" {
+						name = phoneNumber
+					}
+
+					// Sync to Chatwoot asynchronously
+					go func() {
+						err := chatwootManager.SyncMessageToChatwoot(
+							mycli.userID,
+							phoneNumber,
+							name,
+							textContent,
+							evt.Info.IsFromMe,
+						)
+						if err != nil {
+							log.Error().Err(err).
+								Str("userID", mycli.userID).
+								Str("phoneNumber", phoneNumber).
+								Msg("Failed to sync message to Chatwoot")
+						} else {
+							log.Debug().
+								Str("userID", mycli.userID).
+								Str("phoneNumber", phoneNumber).
+								Msg("Message synced to Chatwoot successfully")
+						}
+					}()
+				}
 			} else {
 				log.Debug().Str("messageType", messageType).Str("messageID", evt.Info.ID).Msg("Skipping empty message from history")
 			}

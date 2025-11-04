@@ -99,6 +99,11 @@ func (s *server) routes() {
 	s.router.Handle("/session/hmac/config", c.Then(s.GetHmacConfig())).Methods("GET")
 	s.router.Handle("/session/hmac/config", c.Then(s.DeleteHmacConfig())).Methods("DELETE")
 
+	s.router.Handle("/session/chatwoot/config", c.Then(s.ConfigureChatwoot())).Methods("POST")
+	s.router.Handle("/session/chatwoot/config", c.Then(s.GetChatwootConfig())).Methods("GET")
+	s.router.Handle("/session/chatwoot/config", c.Then(s.DeleteChatwootConfig())).Methods("DELETE")
+	s.router.Handle("/session/chatwoot/test", c.Then(s.TestChatwootConnection())).Methods("POST")
+
 	s.router.Handle("/chat/send/text", c.Then(s.SendMessage())).Methods("POST")
 	s.router.Handle("/chat/delete", c.Then(s.DeleteMessage())).Methods("POST")
 	s.router.Handle("/chat/send/image", c.Then(s.SendImage())).Methods("POST")

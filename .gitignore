@@ -40,3 +40,8 @@ NEW_FEATS.md
 *.code-workspace
 **/*.code-workspace
 .vscode/workspaceStorage/
+
+# Documentation files for AI assistants (not for version control)
+CHATWOOT.md
+AGENTS.md
+CLAUDE.md
