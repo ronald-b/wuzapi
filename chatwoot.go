@@ -357,3 +357,72 @@ func (m *ChatwootManager) SyncMessageToChatwoot(userID, phoneNumber, name, conte
 
 	return nil
 }
+
+// LoadAllChatwootConfigs loads all Chatwoot configurations from database on server startup
+func LoadAllChatwootConfigs(db interface{}) error {
+	type DBExecutor interface {
+		Select(dest interface{}, query string, args ...interface{}) error
+	}
+
+	executor, ok := db.(DBExecutor)
+	if !ok {
+		return fmt.Errorf("database does not implement required Select method")
+	}
+
+	type chatwootRow struct {
+		ID                 string `db:"id"`
+		ChatwootEnabled    bool   `db:"chatwoot_enabled"`
+		ChatwootBaseURL    string `db:"chatwoot_base_url"`
+		ChatwootAccountID  string `db:"chatwoot_account_id"`
+		ChatwootInboxID    string `db:"chatwoot_inbox_id"`
+		ChatwootAPIToken   string `db:"chatwoot_api_token"`
+		ChatwootAutoCreate bool   `db:"chatwoot_auto_create"`
+		ChatwootSyncMedia  bool   `db:"chatwoot_sync_media"`
+	}
+
+	var rows []chatwootRow
+	query := `SELECT id, chatwoot_enabled, chatwoot_base_url, chatwoot_account_id,
+	          chatwoot_inbox_id, chatwoot_api_token, chatwoot_auto_create, chatwoot_sync_media
+	          FROM users WHERE chatwoot_enabled = true`
+
+	err := executor.Select(&rows, query)
+	if err != nil {
+		return fmt.Errorf("failed to load Chatwoot configs from database: %w", err)
+	}
+
+	manager := GetChatwootManager()
+	loadedCount := 0
+
+	for _, row := range rows {
+		config := &ChatwootConfig{
+			Enabled:     row.ChatwootEnabled,
+			BaseURL:     row.ChatwootBaseURL,
+			AccountID:   row.ChatwootAccountID,
+			InboxID:     row.ChatwootInboxID,
+			APIToken:    row.ChatwootAPIToken,
+			AutoCreate:  row.ChatwootAutoCreate,
+			SyncMedia:   row.ChatwootSyncMedia,
+		}
+
+		if err := manager.InitializeChatwootClient(row.ID, config); err != nil {
+			log.Error().
+				Err(err).
+				Str("userID", row.ID).
+				Msg("Failed to initialize Chatwoot client on startup")
+			continue
+		}
+
+		loadedCount++
+		log.Info().
+			Str("userID", row.ID).
+			Str("baseURL", row.ChatwootBaseURL).
+			Str("inboxID", row.ChatwootInboxID).
+			Msg("Chatwoot configuration loaded successfully")
+	}
+
+	if loadedCount > 0 {
+		log.Info().Int("count", loadedCount).Msg("Chatwoot configurations loaded from database")
+	}
+
+	return nil
+}

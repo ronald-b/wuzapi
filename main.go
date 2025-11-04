@@ -324,6 +324,12 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Load Chatwoot configurations from database
+	if err = LoadAllChatwootConfigs(db); err != nil {
+		log.Error().Err(err).Msg("Failed to load Chatwoot configurations")
+		// Non-fatal error - continue startup
+	}
+
 	var dbLog waLog.Logger
 	if *waDebug != "" {
 		dbLog = waLog.Stdout("Database", *waDebug, *colorOutput)
