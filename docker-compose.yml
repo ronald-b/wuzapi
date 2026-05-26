@@ -1,79 +1,79 @@
+networks:
+  dokploy-network:
+    external: true
+
+volumes:
+  wuzapi_db_data:
+  wuzapi_rabbitmq_data:
+
 services:
   wuzapi-server:
     build:
       context: .
       dockerfile: Dockerfile
-    ports:
-      - "${WUZAPI_PORT:-8080}:8080"
+    container_name: wuzapi
+    restart: always
+    expose:
+      - "8080"
     environment:
       - WUZAPI_ADMIN_TOKEN=${WUZAPI_ADMIN_TOKEN}
-      - WUZAPI_GLOBAL_ENCRYPTION_KEY=${WUZAPI_GLOBAL_ENCRYPTION_KEY}
-      - WUZAPI_GLOBAL_HMAC_KEY=${WUZAPI_GLOBAL_HMAC_KEY:-}
-      - WUZAPI_GLOBAL_WEBHOOK=${WUZAPI_GLOBAL_WEBHOOK:-}
-      - DB_USER=${DB_USER:-wuzapi}
-      - DB_PASSWORD=${DB_PASSWORD:-wuzapi}
-      - DB_NAME=${DB_NAME:-wuzapi}
+      - DB_USER=rsend_wuzapi_usr
+      - DB_PASSWORD=${DB_PASSWORD}
+      - DB_NAME=rsend_wuzapi_prod_db
       - DB_HOST=db
-      - DB_PORT=${DB_PORT:-5432}
-      - TZ=${TZ:-America/Sao_Paulo}
-      - WEBHOOK_FORMAT=${WEBHOOK_FORMAT:-json}
-      - SESSION_DEVICE_NAME=${SESSION_DEVICE_NAME:-WuzAPI}
-      # RabbitMQ configuration Optional
-      - RABBITMQ_URL=amqp://wuzapi:wuzapi@rabbitmq:5672/
+      - DB_PORT=5432
+      - TZ=America/Sao_Paulo
+      - WEBHOOK_FORMAT=json
+      - LOG_LEVEL=error
+      - RABBITMQ_URL=amqp://rsend_wuzapi_mq_usr:${RABBITMQ_PASSWORD}@rabbitmq:5672/
       - RABBITMQ_QUEUE=whatsapp_events
+      - WEBHOOK_RETRY_ENABLED=true
+      - WEBHOOK_RETRY_COUNT=10
+      - WEBHOOK_RETRY_DELAY_SECONDS=30
+      - WEBHOOK_ERROR_QUEUE_NAME=wuzapi_dead_letter_webhooks
     depends_on:
       db:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
     networks:
-      - wuzapi-network
-    restart: on-failure
+      - dokploy-network
 
   db:
-    image: postgres:16
+    image: postgres:17.2
+    container_name: postgreswuzapi
+    restart: always
     environment:
-      POSTGRES_USER: ${DB_USER:-wuzapi}
-      POSTGRES_PASSWORD: ${DB_PASSWORD:-wuzapi}
-      POSTGRES_DB: ${DB_NAME:-wuzapi}
-    # ports:
-    #   - "${DB_PORT:-5432}:5432" # Uncomment to access the database directly from your host machine.
+      POSTGRES_USER: rsend_wuzapi_usr
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: rsend_wuzapi_prod_db
     volumes:
-      - db_data:/var/lib/postgresql/data
-    networks:
-      - wuzapi-network
+      - wuzapi_db_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-wuzapi}"]
+      test: ["CMD-SHELL", "pg_isready -U rsend_wuzapi_usr"]
       interval: 5s
       timeout: 5s
       retries: 5
-    restart: always
+    networks:
+      - dokploy-network
 
   rabbitmq:
     image: rabbitmq:3-management
-    hostname: rabbitmq
+    container_name: rabbitmqwuzapi
+    restart: always
+    expose:
+      - "5672"
+      - "15672"                    # management UI — configure domínio no Dokploy se precisar acessar
     environment:
-      RABBITMQ_DEFAULT_USER: wuzapi
-      RABBITMQ_DEFAULT_PASS: wuzapi
+      RABBITMQ_DEFAULT_USER: rsend_wuzapi_mq_usr
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD}
       RABBITMQ_DEFAULT_VHOST: /
-    ports:
-      - "5672:5672" # AMQP port
-      - "15672:15672" # Management UI port
     volumes:
-      - rabbitmq_data:/var/lib/rabbitmq
-    networks:
-      - wuzapi-network
+      - wuzapi_rabbitmq_data:/var/lib/rabbitmq
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5
-    restart: always
-
-networks:
-  wuzapi-network:
-    driver: bridge
-
-volumes:
-  db_data:
-  rabbitmq_data:
+    networks:
+      - dokploy-network
